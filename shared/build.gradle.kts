@@ -25,6 +25,8 @@ kotlin {
         }
     }
 
+    jvm()
+
     js {
         browser()
     }
