@@ -9,6 +9,10 @@ This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop.
 * [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
   It contains several subfolders:
     - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
+      - [`domain`](./shared/src/commonMain/kotlin/com/mila/langualinker/domain) keeps shared business models.
+      - [`data`](./shared/src/commonMain/kotlin/com/mila/langualinker/data) keeps repositories and persistence boundaries.
+      - [`fsrs`](./shared/src/commonMain/kotlin/com/mila/langualinker/fsrs) keeps spaced-repetition engine contracts.
+      - [`association`](./shared/src/commonMain/kotlin/com/mila/langualinker/association) keeps association engine contracts.
     - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
       For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
       the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
@@ -44,6 +48,13 @@ Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
     - Wasm target: `./gradlew :shared:wasmJsTest`
     - JS target: `./gradlew :shared:jsTest`
 - iOS tests: `./gradlew :shared:iosSimulatorArm64Test`
+
+### CI
+
+- GitHub Actions build check runs in [`.github/workflows/build-check.yml`](./.github/workflows/build-check.yml)
+  and verifies:
+  - Android build: `:androidApp:assembleDebug`
+  - iOS framework build: `:shared:linkDebugFrameworkIosSimulatorArm64`
 
 ---
 

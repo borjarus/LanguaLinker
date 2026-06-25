@@ -39,6 +39,9 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
+            implementation(libs.sqldelight.android.driver)
+            implementation(libs.datastore.preferences.core)
+            implementation(libs.ktor.client.okhttp)
         }
         val androidUnitTest by getting {
             kotlin.srcDir("src/androidHostTest/kotlin")
@@ -52,12 +55,22 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
+            implementation(libs.sqldelight.runtime)
+            implementation(libs.koin.core)
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.ktor.client.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
         jsMain.dependencies {
             implementation(libs.wrappers.browser)
+            implementation(libs.ktor.client.js)
+        }
+        iosMain.dependencies {
+            implementation(libs.sqldelight.native.driver)
+            implementation(libs.ktor.client.darwin)
         }
     }
 }
