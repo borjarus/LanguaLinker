@@ -2,45 +2,77 @@
 
 ## Project Goal
 
-A mobile app (Android + iOS) for learning through spaced repetition using the **FSRS** algorithm and a built-in mnemonic association system based on methods from the book *"3 surprising language-learning techniques"* (Substitution Word Technique + Chain Association Method). The app will come with default sentence/phrase decks for each language (e.g. Deck: German). [file:1]
+A mobile app (Android + iOS) for learning through spaced repetition using the **FSRS** algorithm and a built-in mnemonic association system based on methods (Substitution Word Technique + Chain Association Method). The app will come with default sentence/phrase decks for each language (e.g. Deck: German).
 
 ---
 
 ## Architecture and Technology Stack
 
-- **KMP (Kotlin Multiplatform)** — shared logic: domain, data, FSRS engine, association engine. [file:1]
-- **Compose Multiplatform** — UI (Android + iOS). [file:1]
-- **SQLDelight** — local database (shared). [file:1]
-- **Koin** — DI (shared). [file:1]
-- **Kotlinx.serialization** — data serialization. [file:1]
-- **Kotlinx.datetime** — date/time handling (FSRS requires precise timestamps). [file:1]
-- **DataStore** — user settings. [file:1]
-- **Ktor** — requests to the association-generation model (LLM API). [file:1]
-- **Bundled content** — built-in language decks in the app assets. [file:1]
+- **KMP (Kotlin Multiplatform)** — shared logic: domain, data, FSRS engine, association engine.
+- **Compose Multiplatform** — UI (Android + iOS + Desktop + Web).
+- **SQLDelight** — local database (shared).
+- **Koin** — DI (shared).
+- **Kotlinx.serialization** — data serialization.
+- **Kotlinx.datetime** — date/time handling (FSRS requires precise timestamps).
+- **DataStore** — user settings.
+- **Ktor** — requests to the association-generation model (LLM API).
+- **Bundled content** — built-in language decks in the app assets.
 
 ---
 
-## FSRS Data Model
+## Card Model & FSRS Data Model
 
-Each card stores the fields required by the FSRS algorithm. [file:1]
+Each card gets a set of Anki-equivalent fields so that progress and scheduling metadata survive round-trips through import/export, including `.apkg`.
+
+| Anki field (PL) | Anki field (EN) | App field | Notes |
+|---|---|---|---|
+| Pole sortowania | Sort Field | `sortField` | Text used for sorting/search in Card Browser |
+| Tagi | Tags | `tags` | List of strings used for filtering |
+| Oczekuje | Due | `due` | Critical for import/export, preserves scheduling progress |
+| Śr. łatwość (nowa) | Ease | `easeFactor` | Legacy SM-2 compatibility field, populated on Anki import |
+| Trudność | Difficulty | `difficulty` | FSRS difficulty |
+| Stabilność | Stability | `stability` | FSRS stability |
+| Śr. przerwa | Average interval | `averageInterval` | Mean interval across reviews |
+| Pomyłki | Lapses | `lapses` | FSRS lapses |
+| Powtórki | Reps | `reps` | FSRS repetitions |
+| Przywoływalność | Retrievability | `retrievability` | FSRS retrievability |
+| Położenie | Position | `position` | New-card creation order / queue order |
 
 ```kotlin
+data class Card(
+    val id: Long,
+    val deckId: Long,
+    val front: String,
+    val back: String,
+    val sortField: String,
+    val tags: List<String>,
+    val cardType: CardType,      // Sentence | Word
+    val position: Int,
+    val fsrsState: CardFsrsState
+)
+
 data class CardFsrsState(
+    val due: Long,               // Anki-compatible due value
     val stability: Float,
     val difficulty: Float,
     val retrievability: Float,
+    val easeFactor: Float,
+    val averageInterval: Int,
     val lastReviewDate: LocalDate,
     val nextReviewDate: LocalDate,
     val scheduledDays: Int,
     val elapsedDays: Int,
     val reps: Int,
     val lapses: Int,
-    val state: CardState   // New | Learning | Review | Relearning
+    val state: CardState
 )
 
 enum class Rating { Again, Hard, Good, Easy }
 enum class CardState { New, Learning, Review, Relearning }
+enum class CardType { Sentence, Word }
 ```
+
+**Import/export requirement:** the `due` field must always be read from and written to `.apkg` / CSV / JSON payloads. This is what lets the user export a collection and later re-import it without losing the review progress already accumulated on each card.
 
 ## Association Data Model
 
@@ -48,7 +80,7 @@ enum class CardState { New, Learning, Review, Relearning }
 data class Association(
     val id: Long,
     val cardId: Long,
-    val content: String,         // association text
+    val content: String,
     val type: AssociationType,   // Generated | UserSaved
     val isFavorite: Boolean,
     val createdAt: Instant
@@ -57,27 +89,132 @@ data class Association(
 enum class AssociationType { Generated, UserSaved }
 ```
 
+## Grammar Tip Data Model
+
+A card can have zero, one, or multiple grammar tips attached. Grammar tips are primarily meant for sentence-type cards, since a single word rarely needs grammatical context on its own.
+
+```kotlin
+data class GrammarTip(
+    val id: Long,
+    val cardId: Long,
+    val content: String,
+    val order: Int,
+    val source: GrammarTipSource,  // Bundled | Generated | UserAdded
+    val createdAt: Instant
+)
+
+enum class GrammarTipSource { Bundled, Generated, UserAdded }
+```
+
+## Word-Sentence Link Model
+
+Every word inside a sentence card can be linked to its corresponding entry in a **word deck**, so the user can jump from a sentence to a specific word to see its own associations and grammar tips.
+
+```kotlin
+data class SentenceWordLink(
+    val id: Long,
+    val sentenceCardId: Long,
+    val wordCardId: Long,
+    val positionInSentence: Int,
+    val surfaceForm: String
+)
+```
+
+- `surfaceForm` lets the UI highlight the exact word as written in the sentence.
+- A sentence card can have multiple `SentenceWordLink` rows.
+- In newly created sentence cards, each individual word should be linkable to a word-deck card.
+- Tapping a linked word in Study Session or Card Detail opens a quick preview: translation, associations, and grammar tips for that specific word.
+
+## Deck Type Model
+
+Decks now carry a **type**, configurable in Deck Settings. At the start, three types are supported:
+
+```kotlin
+enum class DeckType {
+    Linguistic,
+    TextWithAssociations,
+    Simple
+}
+
+data class DeckSettings(
+    val deckId: Long,
+    val type: DeckType,
+    val requestRetention: Float,
+    val maximumInterval: Int,
+    val newCardsPerDay: Int
+)
+```
+
+- **Linguistic** — standard language deck: front/back, FSRS, associations, grammar tips, and word links.
+- **TextWithAssociations** — free text (paragraph, quote, definition, note) with generated mnemonic associations for the whole text.
+- **Simple** — plain flashcard: front/back only, no associations, no grammar tips, no word links.
+
+Deck type is selected in deck settings and determines which UI sections and fields are available.
+
 ---
 
 ## Built-in Language Decks (Bundled Content)
 
-- JSON/CSV files in `assets/decks/` bundled with the app. [file:1]
-- On first launch, they are imported into SQLDelight. [file:1]
-- Example structure of a `de_deck.json` deck: [file:1]
+**IMPORTANT**  
+Check the alternative solution in `NDJSON + SQLDelight + Kotlin Importer for Android`.
+
+- JSON/CSV files in `assets/decks/` bundled with the app.
+- On first launch, they are imported into SQLDelight.
+- **Default bundled decks contain sentences/phrases, not single words.**
+- Single words are shipped in separate, dedicated word decks.
+
+Example structure of a `de_deck_sentences.json` deck:
 
 ```json
 {
   "language": "de",
-  "name": "German",
+  "name": "German - Sentences",
+  "deckType": "Linguistic",
+  "cardType": "sentence",
   "cards": [
-    { "front": "das Haus", "back": "house", "tags": ["noun", "A1"] },
-    { "front": "Guten Morgen", "back": "Good morning", "tags": ["phrase", "A1"] }
+    {
+      "front": "Ich gehe heute Abend ins Kino.",
+      "back": "I'm going to the cinema tonight.",
+      "tags": ["phrase", "A1"],
+      "grammarTips": [
+        "'ins' = 'in das' (article contraction in the accusative after the preposition 'in')",
+        "'heute Abend' means 'tonight', not a literal word-for-word translation"
+      ],
+      "wordLinks": [
+        { "surfaceForm": "Ich", "wordCardRef": "ich" },
+        { "surfaceForm": "gehe", "wordCardRef": "gehen" },
+        { "surfaceForm": "heute", "wordCardRef": "heute" },
+        { "surfaceForm": "Abend", "wordCardRef": "der Abend" },
+        { "surfaceForm": "ins", "wordCardRef": "in das" },
+        { "surfaceForm": "Kino", "wordCardRef": "das Kino" }
+      ]
+    }
   ]
 }
 ```
 
-- MVP: German, English. [file:1]
-- Additional languages as app updates. [file:1]
+Corresponding word deck example:
+
+```json
+{
+  "language": "de",
+  "name": "German - Words",
+  "deckType": "Linguistic",
+  "cardType": "word",
+  "cards": [
+    { "front": "ich", "back": "I", "tags": ["pronoun", "A1"] },
+    { "front": "gehen", "back": "to go", "tags": ["verb", "A1"] },
+    { "front": "heute", "back": "today", "tags": ["adverb", "A1"] },
+    { "front": "der Abend", "back": "evening", "tags": ["noun", "A1"] },
+    { "front": "in das", "back": "into the", "tags": ["phrase", "A1"] },
+    { "front": "das Kino", "back": "cinema", "tags": ["noun", "A1"] }
+  ]
+}
+```
+
+- `wordCardRef` is resolved at import time to the actual `cardId` in the matching word deck.
+- MVP: German, English.
+- Additional languages as app updates.
 
 ---
 
@@ -85,22 +222,22 @@ enum class AssociationType { Generated, UserSaved }
 
 ### Approach: External LLM API (MVP)
 
-- Ktor sends a prompt to an LLM (OpenAI / Gemini / custom endpoint). [file:1]
-- The prompt includes: [file:1]
-  - the current word/sentence from the flashcard,
+- Ktor sends a prompt to an LLM (OpenAI / Gemini / custom endpoint).
+- The prompt includes:
+  - the current word / sentence / text from the flashcard,
   - source and target language,
-  - an instruction to use the **Substitution Word Technique** — replace the foreign word with a phonetically similar Polish image-word and create a vivid, absurd, emotional scene connecting the two. [file:1]
-- Example for `der Schlüssel` (key): [file:1]
-  > *"Schlüssel sounds like 'szlusel' → imagine a CIGARETTE being pushed into a lock instead of a key, and a heart-shaped cloud of smoke flying out of the keyhole."* [file:1]
+  - an instruction to use mnemonic techniques.
+
+For **TextWithAssociations** decks, the same engine is used but targets the whole text, chaining associations across key terms and ideas.
 
 ### Custom Model Option (v2 / optional)
 
-- Fine-tuning a small model (e.g. Mistral 7B / Phi-3) on pairs: word → mnemonic association using the substitution technique. [file:1]
-- Run locally via ONNX Runtime / llama.cpp (Android/iOS). [file:1]
-- Requires preparing a training dataset (~5000 examples). [file:1]
-- Decision: **start with the API, use a custom model as an option in v2 once user data is available**. [file:1]
+- Fine-tuning a small model (e.g. Mistral 7B / Phi-3) on pairs: word → mnemonic association.
+- Run locally via ONNX Runtime / llama.cpp.
+- Requires preparing a training dataset.
+- Decision: **start with the API, use a custom model as an option in v2 once user data is available**.
 
-### Prompt Engineering (key)
+### Prompt Engineering
 
 ```text
 You are an expert in mnemonics. You use the Substitution Word Technique:
@@ -119,238 +256,218 @@ Translation: [TRANSLATION]
 
 ### PHASE 1 — Project Setup (Week 1)
 
-- [x] Initialize the KMP project (Android + iOS targets). [file:1]
-- [x] Configure Gradle: KMP, Compose Multiplatform, dependency versions. [file:1]
-- [ ] Add dependencies: SQLDelight, Koin, kotlinx.datetime, kotlinx.serialization, DataStore, Ktor. [file:1]
-- [ ] Module structure: [file:1]
+- [x] Initialize the KMP project (Android + iOS targets).
+- [x] Configure Gradle: KMP, Compose Multiplatform, dependency versions.
+- [x] Add dependencies: SQLDelight, Koin, kotlinx.datetime, kotlinx.serialization, DataStore, Ktor.
+- [x] Module structure:
   - `shared/` — domain, data, FSRS engine, association engine
   - `androidApp/`
   - `iosApp/`
-- [ ] CI/CD: GitHub Actions — build checks for Android + iOS. [file:1]
+- [x] CI/CD: GitHub Actions — build checks for Android + iOS.
 
-### PHASE 2 — FSRS Engine (Week 2)
+### PHASE 2 — FSRS-6 Engine (Week 2)
 
-- [ ] Implement the FSRS memory model in `shared/domain/fsrs/`: [file:1]
-  - `FsrsAlgorithm.kt` — logic for calculating the next interval
-  - `FsrsParameters.kt` — 17 weights + configuration
-  - `FsrsScheduler.kt` — review scheduling
-- [ ] Unit tests for the FSRS engine — verify compatibility with the reference implementation. [file:1]
-- [ ] Support states: `New → Learning → Review → Relearning`. [file:1]
-- [ ] Calculate: `stability`, `difficulty`, `retrievability`, `nextInterval`. [file:1]
+- [x] Implement the FSRS memory model in `shared/domain/fsrs/`
+- [x] Unit tests for the FSRS engine
+- [x] Support states: `New → Learning → Review → Relearning`
+- [x] Calculate: `stability`, `difficulty`, `retrievability`, `nextInterval`
 
 ### PHASE 3 — Data Layer (Week 3)
 
-- [ ] SQLDelight schema: [file:1]
-  - table `decks`
-  - table `cards` (+ FSRS state fields)
+- [ ] SQLDelight schema:
+  - table `decks` (+ `type` column)
+  - table `deck_settings`
+  - table `cards` (+ full FSRS / Anki-equivalent fields: `due`, `stability`, `difficulty`, `retrievability`, `easeFactor`, `averageInterval`, `reps`, `lapses`, `sortField`, `position`, `cardType`)
   - table `review_logs`
   - table `card_templates`
-  - table `associations` (content, type: Generated/UserSaved, isFavorite, cardId)
-- [ ] Repositories: `DeckRepository`, `CardRepository`, `ReviewLogRepository`, `AssociationRepository`. [file:1]
-- [ ] Database migrations. [file:1]
-- [ ] DataStore — settings: `requestRetention`, `maximumInterval`, theme, LLM API key. [file:1]
-- [ ] Repository integration tests. [file:1]
+  - table `associations`
+  - table `grammar_tips`
+  - table `sentence_word_links`
+- [ ] Repositories:
+  - `DeckRepository`
+  - `CardRepository`
+  - `ReviewLogRepository`
+  - `AssociationRepository`
+  - `GrammarTipRepository`
+  - `SentenceWordLinkRepository`
+- [ ] Database migrations
+- [ ] DataStore — settings: `requestRetention`, `maximumInterval`, theme, LLM API key
+- [ ] Repository integration tests
 
 ### PHASE 4 — Bundled Content + Import (Week 4)
 
-- [ ] Prepare JSON files for language decks (`assets/decks/`): [file:1]
-  - German: ~500 basic words and phrases (A1–B1)
-  - English: ~500 basic words and phrases (A1–B1)
-- [ ] `BundledDeckImporter` — read from assets, parse, and save to the DB on first launch. [file:1]
-- [ ] DataStore flag: `bundledDecksImported: Boolean`. [file:1]
-- [ ] User CSV import (front; back; deck; tags). [file:1]
-- [ ] Import `.apkg` (Anki package — ZIP + SQLite). [file:1]
-- [ ] `ExportDeckUseCase` — export to CSV. [file:1]
+- [ ] Prepare JSON files for language decks:
+  - German: sentence deck + matching word deck
+  - English: sentence deck + matching word deck
+- [ ] Default bundled content = sentences; single words in separate word decks
+- [ ] `BundledDeckImporter`
+  - parse `grammarTips`
+  - parse `wordLinks`
+  - resolve `wordCardRef`
+  - set `deck.type`
+- [ ] DataStore flag: `bundledDecksImported: Boolean`
+- [ ] User CSV import (`front; back; deck; tags; due`)
+- [ ] Import `.apkg` (Anki package — ZIP + SQLite)
+  - map `due`, `ease`, `reps`, `lapses`, `ivl`
+  - preserve reviewed-card progress
+- [ ] `ExportDeckUseCase` — export to CSV / `.apkg`, always including `due`
+- [ ] Round-trip import/export test for reviewed cards:
+  - export deck
+  - re-import deck
+  - verify `due`, `stability`, `difficulty`, `reps`, `lapses` are unchanged
 
 ### PHASE 5 — Association Engine (Week 5)
 
-- [ ] `AssociationRepository` — CRUD + `getFavoriteAssociation(cardId)` + `getGeneratedAssociations(cardId)`. [file:1]
-- [ ] `GenerateAssociationUseCase` — call the LLM API through Ktor and parse the response. [file:1]
-- [ ] `SaveFavoriteAssociationUseCase` — save the favorite association. [file:1]
-- [ ] `AssociationViewModel` — state management: Loading / Success / Error. [file:1]
-- [ ] Error handling: no network, API error → show a message to the user. [file:1]
-- [ ] Configure the API key in settings (DataStore, do not hardcode). [file:1]
-- [ ] Unit tests: API mocking, favorite-saving logic. [file:1]
+- [ ] `AssociationRepository`
+- [ ] `GenerateAssociationUseCase` — branch behavior by `DeckType`
+- [ ] `SaveFavoriteAssociationUseCase`
+- [ ] `AssociationViewModel`
+- [ ] Error handling: no network, API error
+- [ ] Configure API key in settings
+- [ ] Unit tests
 
 ### PHASE 6 — Domain / Use Cases (Week 6)
 
-- [ ] `GetDueCardsUseCase` — cards due for review today. [file:1]
-- [ ] `ScheduleReviewUseCase` — call FSRS + save to DB. [file:1]
-- [ ] `CreateDeckUseCase` / `UpdateDeckUseCase` / `DeleteDeckUseCase`. [file:1]
-- [ ] `CreateCardUseCase` / `UpdateCardUseCase` / `DeleteCardUseCase`. [file:1]
-- [ ] `GetStudyStatsUseCase` — statistics (retention rate, cards for today, streak span). [file:1]
+- [ ] `GetDueCardsUseCase`
+- [ ] `ScheduleReviewUseCase`
+- [ ] `CreateDeckUseCase` / `UpdateDeckUseCase` / `DeleteDeckUseCase`
+- [ ] `CreateCardUseCase` / `UpdateCardUseCase` / `DeleteCardUseCase`
+- [ ] `AddGrammarTipUseCase` / `RemoveGrammarTipUseCase` / `ReorderGrammarTipsUseCase`
+- [ ] `LinkWordToSentenceUseCase` / `UnlinkWordFromSentenceUseCase` / `GetLinkedWordDetailsUseCase`
+- [ ] `GetStudyStatsUseCase`
 
 ### PHASE 7 — UI Screens (Weeks 7–11)
 
-#### Screen 1: Dashboard (Home Screen)
+#### Screen 1: Dashboard
 
-**Path:** `/home` [file:1]
+**Path:** `/home`
 
-**Content:** [file:1]
-- Deck list with summary: name, language icon, number of cards due today (blue badge), new cards, overdue cards.
-- `+ New deck` button.
-- Daily progress bar (how many cards completed / how many remain).
-- "Day streak" widget.
-- Quick `Study everything` button.
-
-**Actions:** [file:1]
-- tap a deck → `Deck Overview`
-- long tap → options (rename, delete, export)
-- tap `+` → `Create Deck`
+**Content:**
+- Deck list with summary: name, language icon, deck type badge, due today, new cards, overdue cards
+- `+ New deck`
+- Daily progress bar
+- Day streak
+- Quick `Study everything`
 
 #### Screen 2: Deck Overview
 
-**Path:** `/deck/{id}` [file:1]
+**Path:** `/deck/{id}`
 
-**Content:** [file:1]
-- Deck name (editable inline).
-- Deck statistics: New / Due / Overdue.
-- `Start review` button (primary CTA).
-- `Browse cards` button.
-- `Add card` button.
-- Deck settings section (`requestRetention`, learning steps).
+**Content:**
+- Deck name
+- Deck statistics
+- `Start review`
+- `Browse cards`
+- `Add card`
+- Deck settings section, including `DeckType`
 
-#### Screen 3: Study Session (Study Screen) ⭐
+#### Screen 3: Study Session
 
-**Path:** `/study/{deckId}` [file:1]
+**Path:** `/study/{deckId}`
 
-This is the most important screen in the app. [file:1]
+For sentence cards in linguistic decks:
 
-**Content (question phase — card front):** [file:1]
-- Session progress bar (e.g. 12/47).
-- Flashcard front field (word / sentence in the foreign language).
-- `Show answer` button.
-
-**Content (answer phase — card back):** [file:1]
-- Front field (still visible).
-- Translation (card back).
-- **Association section** (collapsed/hidden by default): [file:1]
-  - If a saved favorite association exists → display it as a hidden card (tap/click reveals it).
-  - If no favorite exists → display a `💡 Show association` button (generates via API) + Loading state.
-  - After generation: show the association text + `⭐ Save as favorite` and `🔄 Generate new` buttons.
-  - If a favorite already exists → `🔄 Generate new` temporarily replaces it (does not overwrite without confirmation).
-- **FSRS rating buttons:** `Again` | `Hard` | `Good` | `Easy`. [file:1]
-  - Under each button, display the **next interval** (e.g. "10 min", "3 days", "8 days", "21 days"). [file:1]
-- Card flip animation (front → back). [file:1]
-
-**Association logic in Study Session:** [file:1]
-
-```kotlin
-onShowAnswer():
-  val fav = associationRepo.getFavoriteAssociation(cardId)
-  if (fav != null) → state = ShowFavorite(fav, hidden=true)
-  else             → state = Empty (button "Show association")
-
-onRevealAssociation():
-  state = ShowFavorite(fav, hidden=false)
-
-onGenerateAssociation():
-  state = Loading
-  val generated = generateAssociationUseCase(card)
-  state = ShowGenerated(generated)
-
-onSaveFavorite(association):
-  associationRepo.saveFavorite(cardId, association)
-  state = ShowFavorite(association, hidden=false)
+```text
+💡 Show association | 📘 Grammar tips (2)
+🔗 Ich  🔗 gehe  🔗 heute  🔗 Abend  🔗 ins  🔗 Kino
 ```
 
-**Rating buttons (Again/Hard/Good/Easy):** [file:1]
-- call `ScheduleReviewUseCase` with `Rating` → save the new FSRS state.
-- After the queue is exhausted → `Session Summary`. [file:1]
+- Grammar tips section is hidden by default
+- Linked words open quick previews with:
+  - translation
+  - associations
+  - grammar tips
+- Visible sections depend on `DeckType`:
+  - `Simple` → front/back only
+  - `TextWithAssociations` → association section for full text
+  - `Linguistic` → associations + grammar tips + linked words
 
 #### Screen 4: Session Summary
 
-**Path:** `/study/{deckId}/summary` [file:1]
-
-**Content:** [file:1]
-- Number of reviewed cards.
-- Rating distribution: Again / Hard / Good / Easy.
-- Session retention (%).
-- Session duration.
-- `Done` button → Home.
-- `Continue` button (if there are still cards left).
+- reviewed cards
+- rating distribution
+- retention
+- session duration
 
 #### Screen 5: Card Detail / Association Manager
 
-**Path:** `/card/{id}/associations` [file:1]
-
-**Access:** tap the association icon in Card Browser. [file:1]
-
-**Content:** [file:1]
-- Card front and back (preview).
-- Currently saved favorite association (manually editable).
-- List of previously generated associations (history).
-- `🔄 Generate new association` button.
-- `⭐ Set as favorite` button for each generated one.
-- `✏️ Enter your own association manually` button.
+- card front/back
+- favorite association
+- generated association history
+- grammar tips list
+- linked words section
+- add / edit / remove / reorder
 
 #### Screen 6: Card Editor
 
-**Path:** `/card/create` or `/card/{id}/edit` [file:1]
+- `Front`
+- `Back`
+- `Association`
+- `Grammar tips`
+- `Linked words`
+- Deck selector
+- Tags
+- Live preview
+- `Save` / `Save and add another`
 
-**Content:** [file:1]
-- `Front` field — text.
-- `Back` field — text.
-- `Association` field (optional, manual input or generate with a button).
-- Deck selector (dropdown).
-- Tags (chip input).
-- Live flashcard preview.
-- `Save` / `Save and add another` button.
+Field visibility depends on `DeckType`.
 
 #### Screen 7: Card Browser
 
-**Path:** `/deck/{id}/browse` [file:1]
-
-**Content:** [file:1]
-- Card list with preview (front, FSRS state, ⭐ icon if it has a saved association).
-- Search bar.
-- Filters: New / Learning / Review / Suspended.
-- Multi-select + bulk actions (delete, suspend, change deck, reset state).
-
-**Actions:** [file:1]
-- tap a card → `Card Editor`
-- tap the ⭐/💡 icon → `Card Detail / Association Manager`
+- card list with preview
+- FSRS state
+- due / position preview
+- icons:
+  - ⭐ association
+  - 📘 grammar tips
+  - 🔗 linked words
 
 #### Screen 8: Statistics
 
-**Path:** `/stats` [file:1]
-
-**Content:** [file:1]
-- Review forecast — bar chart: how many cards over the next 30 days.
-- Activity heatmap (365 days).
-- Retention (%).
-- Card stability distribution.
-- Streak, total review count, study time.
+- review forecast
+- activity heatmap
+- retention
+- stability distribution
+- streak, review count, study time
 
 #### Screen 9: Settings
 
-**Path:** `/settings` [file:1]
+- FSRS settings
+- association settings
+- theme
+- notifications
+- import / export
+- reset progress
+- about
 
-**Sections:** [file:1]
-- **FSRS:** `requestRetention` (slider 70–99%), `maximumInterval`, new cards/day limit.
-- **Associations:** field for API key (OpenAI/Gemini), connection test, model (`gpt-4o-mini` / `gemini-flash`).
-- **Theme:** Light / Dark / System.
-- **Notifications:** daily reminder with time.
-- **Import / Export:** import `.apkg` / CSV, export collection.
-- **Reset progress** — dangerous action with confirmation.
-- **About app:** version, links.
+**Deck-level settings:**
+- deck type picker
+- per-type sub-settings
 
 ### PHASE 8 — Notifications (Week 12)
 
-- [ ] Push notification scheduling (AlarmManager Android / UNUserNotification iOS). [file:1]
-- [ ] Daily reminder with the number of cards to study. [file:1]
-- [ ] No cards → do not send. [file:1]
+- [ ] Push notification scheduling
+- [ ] Daily reminder with the number of cards to study
+- [ ] No cards → do not send
 
 ### PHASE 9 — Polish and Testing (Weeks 13–14)
 
-- [ ] Card flip animation (`AnimatedContent` + `graphicsLayer rotationY`). [file:1]
-- [ ] Association reveal animation (blur fade or slide-down). [file:1]
-- [ ] Screen transition animations (Compose Navigation). [file:1]
-- [ ] Unit tests: FSRS engine, AssociationEngine (mock API). [file:1]
-- [ ] UI tests: key flow (add card → session → rate → check association → save favorite). [file:1]
-- [ ] Accessibility: `contentDescription`, contrast, font sizes. [file:1]
-- [ ] Performance profiling (10,000+ cards). [file:1]
-- [ ] Association API error handling: missing key, timeout, token limit. [file:1]
+- [ ] Card flip animation
+- [ ] Association reveal animation
+- [ ] Grammar tips reveal animation
+- [ ] Screen transition animations
+- [ ] Unit tests:
+  - FSRS engine
+  - Association engine
+  - GrammarTipRepository
+  - SentenceWordLinkRepository
+- [ ] UI tests:
+  - add card → session → rate → save association
+  - add sentence card with grammar tips and word links
+  - verify linked word preview
+- [ ] Accessibility
+- [ ] Performance profiling
+- [ ] API error handling
 
 ---
 
@@ -362,38 +479,34 @@ project/
 │   ├── src/commonMain/kotlin/
 │   │   ├── domain/
 │   │   │   ├── fsrs/
-│   │   │   │   ├── FsrsAlgorithm.kt
-│   │   │   │   ├── FsrsParameters.kt
-│   │   │   │   ├── FsrsScheduler.kt
-│   │   │   │   └── models/
 │   │   │   ├── association/
-│   │   │   │   ├── AssociationPromptBuilder.kt
-│   │   │   │   ├── GenerateAssociationUseCase.kt
-│   │   │   │   └── SaveFavoriteAssociationUseCase.kt
+│   │   │   ├── grammar/
+│   │   │   ├── wordlink/
 │   │   │   ├── model/
 │   │   │   │   ├── Deck.kt
+│   │   │   │   ├── DeckSettings.kt
+│   │   │   │   ├── DeckType.kt
 │   │   │   │   ├── Card.kt
 │   │   │   │   ├── Association.kt
+│   │   │   │   ├── GrammarTip.kt
+│   │   │   │   ├── SentenceWordLink.kt
 │   │   │   │   └── ReviewLog.kt
 │   │   │   └── usecase/
 │   │   ├── data/
-│   │   │   ├── database/        (SQLDelight .sq files)
+│   │   │   ├── database/
 │   │   │   ├── repository/
-│   │   │   ├── api/             (Ktor - LLM client)
-│   │   │   ├── bundled/         (BundledDeckImporter)
-│   │   │   └── settings/        (DataStore)
+│   │   │   ├── api/
+│   │   │   ├── bundled/
+│   │   │   └── settings/
 │   │   └── di/
-│   │       └── AppModule.kt
 │   └── src/commonTest/kotlin/
-│       ├── domain/fsrs/
-│       └── domain/association/
 ├── androidApp/
 │   └── src/main/
-│       ├── assets/decks/        (de_deck.json, en_deck.json, ...)
+│       ├── assets/decks/
 │       └── kotlin/ui/
 └── iosApp/
     └── iosApp/
-        └── Resources/decks/     (the same JSON files)
+        └── Resources/decks/
 ```
 
 ---
@@ -403,30 +516,53 @@ project/
 | Feature | Priority |
 |---|---|
 | FSRS engine (Again/Hard/Good/Easy) | Must Have |
-| Bundled language decks (DE, EN) | Must Have |
+| Bundled language decks (DE, EN) — sentences + word decks | Must Have |
 | Study session with FSRS intervals | Must Have |
 | Association generation (LLM API) | Must Have |
 | Save favorite association | Must Have |
-| Association section in Study Session (hidden by default) | Must Have |
+| Association section hidden by default | Must Have |
+| Grammar tips per card (0..n) | Must Have |
+| Deck type selection: Linguistic / TextWithAssociations / Simple | Must Have |
+| Full Anki-equivalent card fields | Must Have |
+| `due` field preserved on import/export | Must Have |
+| Word links for sentence cards | Should Have |
 | Card browser + Association Manager | Should Have |
-| Statistics (forecast, retention) | Should Have |
-| CSV / .apkg import | Should Have |
+| Statistics | Should Have |
+| CSV / `.apkg` import | Should Have |
 | Notifications | Should Have |
 | Manual association entry | Should Have |
 | Generated association history | Could Have |
-| Custom local model (ONNX/llama.cpp) | Could Have (v2) |
+| Custom local model | Could Have (v2) |
 | Cards with image/audio | Could Have |
-| Synchronization (AnkiWeb / custom backend) | Won't Have (v1) |
-```
+| Synchronization | Won't Have (v1) |
 
 ---
 
 ## Key Technical Decisions
 
-- **LLM via API instead of a local model (v1)** — faster delivery, no model overhead on the device; a custom model may be considered in v2 once data about association effectiveness is collected. [file:1]
-- **Association hidden by default** — the user first tries to remember independently; the association is support, not a crutch. [file:1]
-- **Favorite association as a single record per card** — simpler design; generated history stored in a separate table for review. [file:1]
-- **AssociationPromptBuilder as a separate class** — easy prompt replacement and testability without network access. [file:1]
-- **SQLDelight instead of Room** — native KMP support, type-safe queries. [file:1]
-- **Bundled content in assets** — no network required on first launch, the user gets value immediately. [file:1]
-- **Review logs from the start** — necessary for future FSRS weight optimization and analysis of association effectiveness. [file:1]
+- **LLM via API instead of a local model (v1)** — faster delivery, no model overhead on device
+- **Association hidden by default** — user should first try to recall independently
+- **Grammar tips hidden by default** — tips support recall, not replace it
+- **Favorite association as a single record per card** — simpler design
+- **Grammar tips as a 1..n relation per card** — one sentence may require multiple notes
+- **Bundled sentence decks by default, word decks separate** — better context for grammar and reuse
+- **Each word in a sentence can be linked to a word-deck card** — enables in-context access to word-specific associations and grammar
+- **Deck type as a first-class setting** — unified data model, adaptive UI
+- **Anki-equivalent card fields are first-class fields** — `sortField`, `tags`, `due`, `easeFactor`, `difficulty`, `stability`, `averageInterval`, `lapses`, `reps`, `retrievability`, `position`
+- **`due` is always preserved on import/export** — necessary to keep learning progress after re-import
+- **AssociationPromptBuilder as a separate class** — easier testing and prompt replacement
+- **SQLDelight instead of Room** — native KMP support, type-safe queries
+- **Bundled content in assets** — no network required on first launch
+- **Review logs from the start** — needed for future FSRS optimization and effectiveness analysis
+```
+
+## Wprowadzone zmiany
+
+- Dodano `GrammarTip` jako relację 0..n na kartę.
+- Dodano `SentenceWordLink`, żeby każde słowo w zdaniu mogło wskazywać na kartę w decku słów.
+- Doprecyzowano, że w nowo tworzonym zdaniu każdy osobny wyraz powinien być relacją do decku ze słowami.
+- Dodano `DeckType` i `DeckSettings` z trzema typami: `Linguistic`, `TextWithAssociations`, `Simple`.
+- Zmieniono bundled content tak, aby domyślnie bazował na zdaniach/frazach, a słowa były w osobnych deckach.
+- Dodano pełen zestaw pól zgodnych z Anki dla każdej karty.
+- Dopisano, że `Due` musi być zachowywane przy imporcie i eksporcie, aby po imporcie nie tracić progresu przeanalizowanych fiszek.
+
