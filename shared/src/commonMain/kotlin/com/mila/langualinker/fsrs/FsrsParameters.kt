@@ -23,7 +23,7 @@ package com.mila.langualinker.fsrs
  * w20     : forgetting-curve shape / decay (FSRS-6, typically 0.1..0.8)
  */
 data class FsrsParameters(
-    val w: FloatArray = DEFAULT_WEIGHTS.clone(),
+    val w: FloatArray = DEFAULT_WEIGHTS.copyOf(),
     val desiredRetention: Float = 0.9f,
     val maximumInterval: Int = 36500,
 ) {

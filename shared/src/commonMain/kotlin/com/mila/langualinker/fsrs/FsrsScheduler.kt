@@ -79,12 +79,16 @@ class FsrsScheduler(params: FsrsParameters = FsrsParameters()) {
             Rating.Easy  -> CardState.Review   to algorithm.nextInterval(s)
         }
         val r = algorithm.retrievability(schedDays, s)
+        val nextReviewDate = today + schedDays
         return state.copy(
+            due             = nextReviewDate.toEpochDays().toLong(),
             stability      = s,
             difficulty     = d,
             retrievability = r,
+            easeFactor     = state.easeFactor,
+            averageInterval = schedDays,
             lastReviewDate = today,
-            nextReviewDate = today + schedDays,
+            nextReviewDate = nextReviewDate,
             scheduledDays  = schedDays,
             elapsedDays    = 0,
             reps           = state.reps + 1,
@@ -108,12 +112,16 @@ class FsrsScheduler(params: FsrsParameters = FsrsParameters()) {
             Rating.Easy  -> CardState.Review    to algorithm.nextInterval(s).coerceAtLeast(1)
         }
         val r = algorithm.retrievability(schedDays, s)
+        val nextReviewDate = today + schedDays
         return state.copy(
+            due             = nextReviewDate.toEpochDays().toLong(),
             stability      = s,
             difficulty     = d,
             retrievability = r,
+            easeFactor     = state.easeFactor,
+            averageInterval = schedDays,
             lastReviewDate = today,
-            nextReviewDate = today + schedDays,
+            nextReviewDate = nextReviewDate,
             scheduledDays  = schedDays,
             elapsedDays    = elapsedDays,
             reps           = state.reps + 1,
@@ -148,13 +156,17 @@ class FsrsScheduler(params: FsrsParameters = FsrsParameters()) {
             else -> algorithm.nextInterval(newS)
         }
         val newR = algorithm.retrievability(schedDays, newS)
+        val nextReviewDate = today + schedDays
 
         return state.copy(
+            due             = nextReviewDate.toEpochDays().toLong(),
             stability      = newS,
             difficulty     = newD,
             retrievability = newR,
+            easeFactor     = state.easeFactor,
+            averageInterval = schedDays,
             lastReviewDate = today,
-            nextReviewDate = today + schedDays,
+            nextReviewDate = nextReviewDate,
             scheduledDays  = schedDays,
             elapsedDays    = elapsedDays,
             reps           = state.reps + 1,
@@ -178,12 +190,16 @@ class FsrsScheduler(params: FsrsParameters = FsrsParameters()) {
             Rating.Easy  -> CardState.Review     to algorithm.nextInterval(s).coerceAtLeast(1)
         }
         val r = algorithm.retrievability(schedDays, s)
+        val nextReviewDate = today + schedDays
         return state.copy(
+            due             = nextReviewDate.toEpochDays().toLong(),
             stability      = s,
             difficulty     = d,
             retrievability = r,
+            easeFactor     = state.easeFactor,
+            averageInterval = schedDays,
             lastReviewDate = today,
-            nextReviewDate = today + schedDays,
+            nextReviewDate = nextReviewDate,
             scheduledDays  = schedDays,
             elapsedDays    = elapsedDays,
             reps           = state.reps + 1,
@@ -206,16 +222,19 @@ class FsrsScheduler(params: FsrsParameters = FsrsParameters()) {
 
 /** Convenience: new unreviewed card state, ready to schedule the first review. */
 fun newCardFsrsState(today: LocalDate): CardFsrsState = CardFsrsState(
-    stability      = 0f,
-    difficulty     = 5f,
-    retrievability = 0f,
-    lastReviewDate = today,
-    nextReviewDate = today,
-    scheduledDays  = 0,
-    elapsedDays    = 0,
-    reps           = 0,
-    lapses         = 0,
-    state          = CardState.New,
+    due             = 0L,
+    stability       = 0f,
+    difficulty      = 5f,
+    retrievability  = 0f,
+    easeFactor      = 2.5f,
+    averageInterval = 0,
+    lastReviewDate  = today,
+    nextReviewDate  = today,
+    scheduledDays   = 0,
+    elapsedDays     = 0,
+    reps            = 0,
+    lapses          = 0,
+    state           = CardState.New,
 )
 
 /** Advance a [LocalDate] by [days]. */
