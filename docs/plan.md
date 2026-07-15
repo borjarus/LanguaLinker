@@ -274,7 +274,7 @@ Translation: [TRANSLATION]
 
 ### PHASE 3 — Data Layer (Week 3)
 
-- [ ] SQLDelight schema:
+- [x] SQLDelight schema:
   - table `decks` (+ `type` column)
   - table `deck_settings`
   - table `cards` (+ full FSRS / Anki-equivalent fields: `due`, `stability`, `difficulty`, `retrievability`, `easeFactor`, `averageInterval`, `reps`, `lapses`, `sortField`, `position`, `cardType`)
@@ -283,16 +283,16 @@ Translation: [TRANSLATION]
   - table `associations`
   - table `grammar_tips`
   - table `sentence_word_links`
-- [ ] Repositories:
+- [x] Repositories:
   - `DeckRepository`
   - `CardRepository`
   - `ReviewLogRepository`
   - `AssociationRepository`
   - `GrammarTipRepository`
   - `SentenceWordLinkRepository`
-- [ ] Database migrations
-- [ ] DataStore — settings: `requestRetention`, `maximumInterval`, theme, LLM API key
-- [ ] Repository integration tests
+- [x] Database migrations
+- [x] DataStore — settings: `requestRetention`, `maximumInterval`, theme, LLM API key
+- [x] Repository integration tests
 
 ### PHASE 4 — Bundled Content + Import (Week 4)
 
