@@ -1,0 +1,46 @@
+name: Build check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  android-build:
+    name: Android build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android app
+        run: ./gradlew :androidApp:assembleDebug
+
+  ios-build:
+    name: iOS build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build iOS framework
+        run: ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64

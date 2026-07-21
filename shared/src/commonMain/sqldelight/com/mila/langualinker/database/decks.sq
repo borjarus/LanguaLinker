@@ -1,0 +1,24 @@
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    language TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'Linguistic'
+);
+
+getAllDecks:
+SELECT * FROM decks;
+
+getDeckById:
+SELECT * FROM decks WHERE id = :id;
+
+insertDeck:
+INSERT INTO decks (name, language, type) VALUES (:name, :language, :type);
+
+updateDeck:
+UPDATE decks SET name = :name, language = :language, type = :type WHERE id = :id;
+
+deleteDeck:
+DELETE FROM decks WHERE id = :id;
+
+lastInsertRowId:
+SELECT last_insert_rowid();
