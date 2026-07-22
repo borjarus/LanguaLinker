@@ -8,7 +8,6 @@ data class Card(
     val deckId: Long,
     val front: String,
     val back: String,
-    val sortField: String,
     val tags: List<String>,
     val cardType: CardType,
     val position: Int,

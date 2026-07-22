@@ -26,7 +26,6 @@ Each card gets a set of Anki-equivalent fields so that progress and scheduling m
 
 | Anki field (PL) | Anki field (EN) | App field | Notes |
 |---|---|---|---|
-| Pole sortowania | Sort Field | `sortField` | Text used for sorting/search in Card Browser |
 | Tagi | Tags | `tags` | List of strings used for filtering |
 | Oczekuje | Due | `due` | Critical for import/export, preserves scheduling progress |
 | Śr. łatwość (nowa) | Ease | `easeFactor` | Legacy SM-2 compatibility field, populated on Anki import |
@@ -44,7 +43,6 @@ data class Card(
     val deckId: Long,
     val front: String,
     val back: String,
-    val sortField: String,
     val tags: List<String>,
     val cardType: CardType,      // Sentence | Word
     val position: Int,
@@ -173,7 +171,7 @@ Example structure of a `de_deck_sentences.json` deck:
   "cardType": "sentence",
   "cards": [
     {
-      "front": "Ich gehe heute Abend ins Kino.",
+      "front": "Ich gehe heute Abend ins Kino. /ɪç ˈɡeːə ˈhɔɪtə ˈaːbənt ɪns ˈkiːno/",
       "back": "I'm going to the cinema tonight.",
       "tags": ["phrase", "A1"],
       "grammarTips": [
@@ -277,7 +275,7 @@ Translation: [TRANSLATION]
 - [x] SQLDelight schema:
   - table `decks` (+ `type` column)
   - table `deck_settings`
-  - table `cards` (+ full FSRS / Anki-equivalent fields: `due`, `stability`, `difficulty`, `retrievability`, `easeFactor`, `averageInterval`, `reps`, `lapses`, `sortField`, `position`, `cardType`)
+  - table `cards` (+ full FSRS / Anki-equivalent fields: `due`, `stability`, `difficulty`, `retrievability`, `easeFactor`, `averageInterval`, `reps`, `lapses`, `position`, `cardType`)
   - table `review_logs`
   - table `card_templates`
   - table `associations`
@@ -296,21 +294,31 @@ Translation: [TRANSLATION]
 
 ### PHASE 4 — Bundled Content + Import (Week 4)
 
-- [ ] Prepare JSON files for language decks:
-  - German: sentence deck + matching word deck
-  - English: sentence deck + matching word deck
+- [ ] Use Prepared examples json/ndjson:
+  - Deck: shared/src/commonMain/assets/de_a1.json
+  - Cards: shared/src/commonMain/assets/de_phrases_cards_a1.ndjson
 - [ ] Default bundled content = sentences; single words in separate word decks
 - [ ] `BundledDeckImporter`
   - parse `grammarTips`
-  - parse `wordLinks`
+  - parse `wordLinks` (if it does not exist, generate it based on the sentence)
   - resolve `wordCardRef`
   - set `deck.type`
 - [ ] DataStore flag: `bundledDecksImported: Boolean`
-- [ ] User CSV import (`front; back; deck; tags; due`)
 - [ ] Import `.apkg` (Anki package — ZIP + SQLite)
   - map `due`, `ease`, `reps`, `lapses`, `ivl`
   - preserve reviewed-card progress
+  - create a mechanism for importing and exporting data from the console and from the application (UI)
+  - Use the sample file when creating the import/export mechanism. path: shared/src/commonMain/assets/sample_german_a1_sentences.apkg
+  - The script should include a parameter specifying the export destination. The default is a database, but you can also choose JSON, NDJSON or CSV.
+  - There should also be a parameter specifying the import source type. You can import from APKG (by default), NDJSON, JSON or CSV.
+  - Next, return a command that will allow me to run the import from the console, using the path to the sample apkg file as a parameter
+  - I would like this to be returned along with a description of the available parameters and options. Please add a -h (--help) switch to the console script, which will display a description of the script.
+- [] Import CSV / JSON / NDJSON
+  - map `due`, `ease`, `reps`, `lapses`, `ivl`
+  - preserve reviewed-card progress
 - [ ] `ExportDeckUseCase` — export to CSV / `.apkg`, always including `due`
+- [ ] Export cards to JSON / NDJSON for backup / sharing
+  - in fields front, back possible is to save as Markdown string, so that formatting is preserved
 - [ ] Round-trip import/export test for reviewed cards:
   - export deck
   - re-import deck
@@ -548,7 +556,7 @@ project/
 - **Bundled sentence decks by default, word decks separate** — better context for grammar and reuse
 - **Each word in a sentence can be linked to a word-deck card** — enables in-context access to word-specific associations and grammar
 - **Deck type as a first-class setting** — unified data model, adaptive UI
-- **Anki-equivalent card fields are first-class fields** — `sortField`, `tags`, `due`, `easeFactor`, `difficulty`, `stability`, `averageInterval`, `lapses`, `reps`, `retrievability`, `position`
+- **Anki-equivalent card fields are first-class fields** — `tags`, `due`, `easeFactor`, `difficulty`, `stability`, `averageInterval`, `lapses`, `reps`, `retrievability`, `position`
 - **`due` is always preserved on import/export** — necessary to keep learning progress after re-import
 - **AssociationPromptBuilder as a separate class** — easier testing and prompt replacement
 - **SQLDelight instead of Room** — native KMP support, type-safe queries
