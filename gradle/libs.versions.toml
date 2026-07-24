@@ -20,6 +20,7 @@ kotlin-wrappers = "2026.5.3"
 ktor = "3.2.3"
 material3 = "1.11.0-alpha07"
 sqldelight = "2.1.0"
+clikt = "5.0.3"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -54,6 +55,7 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
+clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

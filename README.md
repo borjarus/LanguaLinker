@@ -56,6 +56,19 @@ Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
   - Android build: `:androidApp:assembleDebug`
   - iOS framework build: `:shared:linkDebugFrameworkIosSimulatorArm64`
 
+### CLI Importer
+
+Example of using the CLI importer to import a deck from a CSV file:
+
+```bash
+java -jar cliApp/build/libs/cliApp-all.jar import \
+  --input shared/src/commonMain/assets/sample_german_a1_sentences.apkg \
+  --from-format apkg \
+  --deck-name "German A1" \
+  --language de \
+  --db-path ./langualinker.db
+  ```
+
 ---
 
 Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html),
