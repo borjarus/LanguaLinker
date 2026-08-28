@@ -6,6 +6,7 @@ data class AppSettings(
     val theme: AppTheme = AppTheme.System,
     val llmApiKey: String = "",
     val llmApiProvider: LlmApiProvider = LlmApiProvider.OpenAI,
+    val bundledDecksImported: Boolean = false,
 )
 
 enum class AppTheme { System, Light, Dark }

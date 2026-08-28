@@ -17,6 +17,7 @@ class AppSettingsRepositoryImpl(
             theme = prefs[AppSettingsKeys.THEME]?.let { runCatching { AppTheme.valueOf(it) }.getOrNull() } ?: AppTheme.System,
             llmApiKey = prefs[AppSettingsKeys.LLM_API_KEY] ?: "",
             llmApiProvider = prefs[AppSettingsKeys.LLM_API_PROVIDER]?.let { runCatching { LlmApiProvider.valueOf(it) }.getOrNull() } ?: LlmApiProvider.OpenAI,
+            bundledDecksImported = prefs[AppSettingsKeys.BUNDLED_DECKS_IMPORTED] ?: false,
         )
     }
 
@@ -38,5 +39,9 @@ class AppSettingsRepositoryImpl(
 
     override suspend fun updateLlmApiProvider(provider: LlmApiProvider) {
         dataStore.edit { it[AppSettingsKeys.LLM_API_PROVIDER] = provider.name }
+    }
+
+    override suspend fun setBundledDecksImported(value: Boolean) {
+        dataStore.edit { it[AppSettingsKeys.BUNDLED_DECKS_IMPORTED] = value }
     }
 }

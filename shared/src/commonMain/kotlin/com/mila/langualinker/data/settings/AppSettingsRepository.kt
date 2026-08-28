@@ -9,4 +9,5 @@ interface AppSettingsRepository {
     suspend fun updateTheme(theme: AppTheme)
     suspend fun updateLlmApiKey(key: String)
     suspend fun updateLlmApiProvider(provider: LlmApiProvider)
+    suspend fun setBundledDecksImported(value: Boolean)
 }
