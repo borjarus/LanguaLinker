@@ -22,8 +22,19 @@ CREATE TABLE IF NOT EXISTS cards (
     created_at INTEGER NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_cards_deck_position ON cards(deck_id, position);
+
+CREATE INDEX IF NOT EXISTS idx_cards_deck_due ON cards(deck_id, next_review_date);
+
 getCardById:
 SELECT * FROM cards WHERE id = :id;
+
+-- Resolves a bundled wordCardRef (a lemma, e.g. "gehen") against a word deck.
+getCardByDeckIdAndFront:
+SELECT * FROM cards WHERE deck_id = :deckId AND front = :front LIMIT 1;
+
+countCardsByDeckId:
+SELECT COUNT(*) FROM cards WHERE deck_id = :deckId;
 
 getCardsByDeckId:
 SELECT * FROM cards WHERE deck_id = :deckId ORDER BY position;

@@ -6,6 +6,42 @@
 
 ---
 
+## Implementation status (verified 2026-08-28)
+
+An audit of the code against v2's Phase 1–4 checkboxes found several items ticked in the plan
+but not present in the code, and the build itself was broken. Corrected since:
+
+| Area | Was | Now |
+|---|---|---|
+| Build | `shared` did not apply the kotlinx-serialization plugin, so every `@Serializable` DTO failed at runtime; `kotlinx.datetime.Clock` had moved to `kotlin.time.Clock` and did not compile | Compiles; 135 tests green |
+| Repositories (Phase 3) | Interfaces only — the only implementations were test fakes, so nothing ever reached SQLite | `SqlDelight*Repository` for all six, with 22 integration tests against a real in-memory database |
+| Migrations (Phase 3) | None; schema was `CREATE TABLE IF NOT EXISTS` only | Migration mechanism in place, schema at version 2, migration test upgrades a v1 fixture |
+| Koin (Phase 1) | Declared as a dependency, never used | `sharedModule` + per-platform modules; Android starts Koin in `LanguaLinkerApplication` |
+| Settings (Phase 3) | DataStore on Android only | Android (DataStore), iOS (`NSUserDefaults`), desktop (properties file), in-memory for web/tests. The API key is deliberately **not** persisted outside Android pending C6 |
+| Bundled content (Phase 4) | One German deck with a single card; `importAll()` never called; `bundledDecksImported` never read | Four decks (DE/EN × words/sentences, 113 cards), imported on first launch via `EnsureBundledDecksUseCase` |
+| `wordCardRef` resolution (Phase 4) | Every link stored `wordCardId = 0` — a dangling foreign key | Resolved against the paired word deck by lemma, with `LinkResolution` (`Resolved`/`Unresolved`/`Ambiguous`/`UserOverridden`) and a nullable `word_card_id` |
+| Import contract (Phase 4) | Not idempotent, not ordered, not transactional | All three, with tests; word decks precede sentence decks and the ordering violation fails loudly |
+| Content linter | Not started | `BundledContentLinterTest` — fails the build on an unresolvable `wordCardRef`, a duplicate front, a missing grammar tip, a drifting card count |
+| CSV import (Phase 4) | Fixed 16-column comma format, positional | Delimiter detection (`,`/`;`/tab), BOM stripping, header-name mapping (English + Polish), `deck` column routing, `due` as ISO date or number |
+| CI | Built only; ran no tests; triggered on a `main` branch that does not exist | Runs `:shared:jvmTest` and `:shared:testDebugUnitTest` on `master` |
+
+**Deliberately still open:**
+
+- `.apkg` import/export in `shared/` — moved to Phase 11 by this plan. A raw-JDBC prototype
+  exists in `cliApp/`.
+- Phase 3.5 in full: `guid`/`updatedAt`/`deletedAt`/`usn` on every table, `notes`/`note_types`,
+  `due_at: Instant` replacing the polymorphic `due`, dropping the stored `retrievability` and
+  `average_interval`, `queue_state`/`flags`, the `deck_config` split, `SecureStorage`, the
+  50 000-card fixture. Only the `sentence_word_links` part was pulled forward, because
+  resolving `wordCardRef` correctly is impossible without a nullable `word_card_id`.
+- Phase 4 as defined by **this** plan (Design System & App Shell) has not started: there is no
+  theme, no navigation graph, no component library, no i18n, no onboarding. `App.kt` is still
+  the Compose Multiplatform template screen.
+- ktlint/detekt in CI (Phase 1 backlog) — would need a formatting pass across existing code.
+- `webApp` does not build: it targets `wasmJs`, which `shared` has never enabled. Pre-existing.
+
+---
+
 ## How to read this document
 
 Everything marked **`[v3]`** is new or materially changed compared to *Plan ENG v2*. Content without a marker is carried over unchanged and is still binding. Nothing from v2 was deleted; a few items were **moved** to a different phase — those moves are listed explicitly in *Mapping v2 → v3*.
@@ -893,7 +929,7 @@ FSRS answers "given this card and this rating, what is the new state?". It does 
 - [ ] Split `deck_settings` into `deck_config` (shared preset) + `deck_settings` (per-deck type/config link); add `learning_steps`, `relearning_steps`, `fsrs_parameters`, `review_order`, `bury_siblings`, `leech_threshold`.
 - [ ] Extend `review_logs` with `state_before`, `stability_before`, `difficulty_before`, `duration_ms`, `review_kind`, `fsrs_version`, `parameters_hash`.
 - [ ] Move `associations.card_id` and `grammar_tips.card_id` → `note_id`.
-- [ ] Add `sentence_word_links.lemma`, `start_index`, `end_index`, `resolution`; make `word_card_id` nullable.
+- [x] Add `sentence_word_links.resolution`; make `word_card_id` nullable. *(Pulled forward — the `wordCardRef` resolver cannot be correct without it. `lemma`, `start_index` and `end_index` are still outstanding, so multi-token links like "heute Abend" remain unrepresentable.)*
 - [ ] Add partial unique index: one favorite association per note.
 - [ ] Add `media` table (reserved).
 - [ ] **Move the LLM API key out of DataStore into Keystore/Keychain** (C6) via `expect/actual` `SecureStorage`.

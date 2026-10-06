@@ -7,6 +7,11 @@ CREATE TABLE IF NOT EXISTS associations (
     created_at INTEGER NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_associations_card_favorite ON associations(card_id, is_favorite);
+
+getAssociationById:
+SELECT * FROM associations WHERE id = :id;
+
 getAssociationsByCardId:
 SELECT * FROM associations WHERE card_id = :cardId ORDER BY created_at DESC;
 

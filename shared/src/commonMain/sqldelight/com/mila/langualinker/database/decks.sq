@@ -11,6 +11,11 @@ SELECT * FROM decks;
 getDeckById:
 SELECT * FROM decks WHERE id = :id;
 
+-- (name, language) is the natural key used to keep the bundled import idempotent until
+-- deck GUIDs arrive in Phase 3.5.
+getDeckByNameAndLanguage:
+SELECT * FROM decks WHERE name = :name AND language = :language LIMIT 1;
+
 insertDeck:
 INSERT INTO decks (name, language, type) VALUES (:name, :language, :type);
 

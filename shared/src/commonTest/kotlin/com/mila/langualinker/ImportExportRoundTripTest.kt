@@ -2,60 +2,105 @@ package com.mila.langualinker
 
 import com.mila.langualinker.data.importer.ExportFormat
 import com.mila.langualinker.data.importer.ImportFormat
-import com.mila.langualinker.data.repository.CardRepository
-import com.mila.langualinker.data.repository.DeckRepository
-import com.mila.langualinker.data.repository.GrammarTipRepository
-import com.mila.langualinker.data.repository.SentenceWordLinkRepository
 import com.mila.langualinker.domain.model.Card
 import com.mila.langualinker.domain.model.CardType
-import com.mila.langualinker.domain.model.Deck
-import com.mila.langualinker.domain.model.DeckSettings
 import com.mila.langualinker.domain.model.DeckType
 import com.mila.langualinker.domain.model.GrammarTip
 import com.mila.langualinker.domain.model.GrammarTipSource
 import com.mila.langualinker.domain.model.SentenceWordLink
-import com.mila.langualinker.domain.usecase.ExportDeckUseCase
-import com.mila.langualinker.domain.usecase.ImportDeckUseCase
 import com.mila.langualinker.fsrs.CardFsrsState
 import com.mila.langualinker.fsrs.CardState
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.mila.langualinker.testutil.FakeRepositories
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ImportExportRoundTripTest {
+
+    // ── JSON ──────────────────────────────────────────────────────────────────
+
     @Test
     fun exportJsonAndReimport_preservesFsrsState() = runBlocking {
         val source = FakeRepositories()
         val sourceDeckId = source.seedDeckWithCard()
-        val exportUseCase = source.createExportUseCase()
 
-        val json = exportUseCase.export(sourceDeckId, ExportFormat.JSON)
+        val json = source.createExportUseCase().export(sourceDeckId, ExportFormat.JSON)
 
         val target = FakeRepositories()
-        val importUseCase = target.createImportUseCase()
-        val importedDeckId = importUseCase.import(json, ImportFormat.JSON)
+        val importedDeckId = target.createImportUseCase().import(json, ImportFormat.JSON)
         val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
 
         assertFsrs(importedCard)
+        assertReviewDates(importedCard)
     }
+
+    @Test
+    fun exportJsonAndReimport_preservesDeckMetadata() = runBlocking {
+        val source = FakeRepositories()
+        val sourceDeckId = source.seedDeckWithCard()
+
+        val json = source.createExportUseCase().export(sourceDeckId, ExportFormat.JSON)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(json, ImportFormat.JSON)
+        val deck = target.deckRepository.getDeckById(importedDeckId)!!
+
+        assertEquals("German A1", deck.name)
+        assertEquals("de", deck.language)
+        assertEquals(DeckType.Linguistic, deck.type)
+    }
+
+    @Test
+    fun exportJsonAndReimport_preservesGrammarTipsAndWordLinks() = runBlocking {
+        val source = FakeRepositories()
+        val sourceDeckId = source.seedDeckWithCard()
+
+        val json = source.createExportUseCase().export(sourceDeckId, ExportFormat.JSON)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(json, ImportFormat.JSON)
+        val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
+
+        val tips = target.grammarTipRepository.getTipsByCardId(importedCard.id).first()
+        assertEquals(listOf("Verb second position."), tips.map { it.content })
+        assertEquals(GrammarTipSource.Bundled, tips.single().source)
+
+        val links = target.sentenceWordLinkRepository.getLinksBySentenceCardId(importedCard.id)
+        assertEquals(listOf("Ich"), links.map { it.surfaceForm })
+    }
+
+    @Test
+    fun exportJsonAndReimport_preservesCardContentAndTags() = runBlocking {
+        val source = FakeRepositories()
+        val sourceDeckId = source.seedDeckWithCard()
+
+        val json = source.createExportUseCase().export(sourceDeckId, ExportFormat.JSON)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(json, ImportFormat.JSON)
+        val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
+
+        assertEquals("**Ich gehe heute Abend ins Kino.**", importedCard.front)
+        assertEquals("Idę dzisiaj wieczorem do kina.", importedCard.back)
+        assertEquals(listOf("a1", "travel"), importedCard.tags)
+        assertEquals(CardType.Sentence, importedCard.cardType)
+    }
+
+    // ── NDJSON ────────────────────────────────────────────────────────────────
 
     @Test
     fun exportNdjsonAndReimport_preservesFsrsState() = runBlocking {
         val source = FakeRepositories()
         val sourceDeckId = source.seedDeckWithCard()
-        val exportUseCase = source.createExportUseCase()
 
-        val ndjson = exportUseCase.export(sourceDeckId, ExportFormat.NDJSON)
+        val ndjson = source.createExportUseCase().export(sourceDeckId, ExportFormat.NDJSON)
 
         val target = FakeRepositories()
-        val importUseCase = target.createImportUseCase()
-        val importedDeckId = importUseCase.import(
+        val importedDeckId = target.createImportUseCase().import(
             content = ndjson,
             format = ImportFormat.NDJSON,
             deckName = "Imported NDJSON",
@@ -65,209 +110,185 @@ class ImportExportRoundTripTest {
         val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
 
         assertFsrs(importedCard)
+        assertReviewDates(importedCard)
     }
+
+    // ── CSV — explicit Phase-4 requirement ────────────────────────────────────
+
+    @Test
+    fun exportCsvAndReimport_preservesFsrsState() = runBlocking {
+        val source = FakeRepositories()
+        val sourceDeckId = source.seedDeckWithCard()
+
+        val csv = source.createExportUseCase().export(sourceDeckId, ExportFormat.CSV)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(
+            content = csv,
+            format = ImportFormat.CSV,
+            deckName = "Imported CSV",
+            language = "de",
+            deckType = DeckType.Linguistic,
+        )
+        val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
+
+        assertFsrs(importedCard)
+        assertReviewDates(importedCard)
+        assertEquals("**Ich gehe heute Abend ins Kino.**", importedCard.front)
+        assertEquals("Idę dzisiaj wieczorem do kina.", importedCard.back)
+        assertEquals(listOf("a1", "travel"), importedCard.tags)
+    }
+
+    @Test
+    fun exportCsvAndReimport_handlesCommasQuotesAndNewlines() = runBlocking {
+        val source = FakeRepositories()
+        val deckId = source.deckRepository.insertDeck("Tricky", "de", DeckType.Linguistic.name)
+        source.cardRepository.insertCard(
+            card(
+                deckId = deckId,
+                front = "Er sagte: \"Hallo, Welt!\"",
+                back = "Line one\nLine two, with comma",
+                position = 0,
+            )
+        )
+
+        val csv = source.createExportUseCase().export(deckId, ExportFormat.CSV)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(csv, ImportFormat.CSV)
+        val importedCard = target.cardRepository.getCardsByDeckId(importedDeckId).first().single()
+
+        assertEquals("Er sagte: \"Hallo, Welt!\"", importedCard.front)
+        assertEquals("Line one\nLine two, with comma", importedCard.back)
+    }
+
+    @Test
+    fun exportCsvAndReimport_preservesCardOrderForMultipleCards() = runBlocking {
+        val source = FakeRepositories()
+        val deckId = source.deckRepository.insertDeck("Multi", "de", DeckType.Linguistic.name)
+        repeat(3) { i ->
+            source.cardRepository.insertCard(
+                card(deckId = deckId, front = "front-$i", back = "back-$i", position = i)
+            )
+        }
+
+        val csv = source.createExportUseCase().export(deckId, ExportFormat.CSV)
+
+        val target = FakeRepositories()
+        val importedDeckId = target.createImportUseCase().import(csv, ImportFormat.CSV)
+        val importedCards = target.cardRepository.getCardsByDeckId(importedDeckId).first()
+
+        assertEquals(3, importedCards.size)
+        assertEquals(listOf("front-0", "front-1", "front-2"), importedCards.map { it.front })
+        assertEquals(listOf(0, 1, 2), importedCards.map { it.position })
+    }
+
+    @Test
+    fun importCsv_headerOnly_createsEmptyDeck() = runBlocking {
+        val target = FakeRepositories()
+        val headerOnly = "front,back,tags,cardType,due,stability,difficulty,reps,lapses," +
+            "easeFactor,averageInterval,scheduledDays,elapsedDays,cardState,lastReviewDate,nextReviewDate"
+
+        val importedDeckId = target.createImportUseCase().import(headerOnly, ImportFormat.CSV)
+        val importedCards = target.cardRepository.getCardsByDeckId(importedDeckId).first()
+
+        assertTrue(importedCards.isEmpty())
+    }
+
+    // ── Shared assertions and fixtures ────────────────────────────────────────
 
     private fun assertFsrs(card: Card) {
         assertEquals(172800L, card.fsrsState.due)
         assertEquals(12.5f, card.fsrsState.stability)
         assertEquals(4.2f, card.fsrsState.difficulty)
+        assertEquals(2.65f, card.fsrsState.easeFactor)
+        assertEquals(10, card.fsrsState.averageInterval)
+        assertEquals(2, card.fsrsState.scheduledDays)
+        assertEquals(1, card.fsrsState.elapsedDays)
         assertEquals(7, card.fsrsState.reps)
         assertEquals(2, card.fsrsState.lapses)
         assertEquals(CardState.Review, card.fsrsState.state)
     }
 
-    private class FakeRepositories {
-        val deckRepository = FakeDeckRepository()
-        val cardRepository = FakeCardRepository()
-        val grammarTipRepository = FakeGrammarTipRepository()
-        val sentenceWordLinkRepository = FakeSentenceWordLinkRepository()
+    private fun assertReviewDates(card: Card) {
+        assertEquals(LocalDate(2026, 7, 20), card.fsrsState.lastReviewDate)
+        assertEquals(LocalDate(2026, 7, 22), card.fsrsState.nextReviewDate)
+    }
 
-        fun createExportUseCase() = ExportDeckUseCase(
-            deckRepository = deckRepository,
-            cardRepository = cardRepository,
-            grammarTipRepository = grammarTipRepository,
-            sentenceWordLinkRepository = sentenceWordLinkRepository,
+    private fun card(deckId: Long, front: String, back: String, position: Int) = Card(
+        id = 0L,
+        deckId = deckId,
+        front = front,
+        back = back,
+        tags = emptyList(),
+        cardType = CardType.Sentence,
+        position = position,
+        fsrsState = CardFsrsState(
+            due = 0L,
+            stability = 0f,
+            difficulty = 0f,
+            retrievability = 0f,
+            easeFactor = 2.5f,
+            averageInterval = 0,
+            lastReviewDate = LocalDate(2026, 1, 1),
+            nextReviewDate = LocalDate(2026, 1, 1),
+            scheduledDays = 0,
+            elapsedDays = 0,
+            reps = 0,
+            lapses = 0,
+            state = CardState.New,
+        ),
+        createdAt = Clock.System.now(),
+    )
+
+    private suspend fun FakeRepositories.seedDeckWithCard(): Long {
+        val deckId = deckRepository.insertDeck("German A1", "de", DeckType.Linguistic.name)
+        val cardId = cardRepository.insertCard(
+            Card(
+                id = 0L,
+                deckId = deckId,
+                front = "**Ich gehe heute Abend ins Kino.**",
+                back = "Idę dzisiaj wieczorem do kina.",
+                tags = listOf("a1", "travel"),
+                cardType = CardType.Sentence,
+                position = 0,
+                fsrsState = CardFsrsState(
+                    due = 172800L,
+                    stability = 12.5f,
+                    difficulty = 4.2f,
+                    retrievability = 0.84f,
+                    easeFactor = 2.65f,
+                    averageInterval = 10,
+                    lastReviewDate = LocalDate(2026, 7, 20),
+                    nextReviewDate = LocalDate(2026, 7, 22),
+                    scheduledDays = 2,
+                    elapsedDays = 1,
+                    reps = 7,
+                    lapses = 2,
+                    state = CardState.Review,
+                ),
+                createdAt = Clock.System.now(),
+            )
         )
-
-        fun createImportUseCase() = ImportDeckUseCase(
-            deckRepository = deckRepository,
-            cardRepository = cardRepository,
-            grammarTipRepository = grammarTipRepository,
-            sentenceWordLinkRepository = sentenceWordLinkRepository,
+        grammarTipRepository.insertTip(
+            GrammarTip(
+                id = 0L,
+                cardId = cardId,
+                content = "Verb second position.",
+                order = 0,
+                source = GrammarTipSource.Bundled,
+                createdAt = Clock.System.now(),
+            )
         )
-
-        suspend fun seedDeckWithCard(): Long {
-            val deckId = deckRepository.insertDeck("German A1", "de", DeckType.Linguistic.name)
-            val cardId = cardRepository.insertCard(
-                Card(
-                    id = 0L,
-                    deckId = deckId,
-                    front = "**Ich gehe heute Abend ins Kino.**",
-                    back = "Idę dzisiaj wieczorem do kina.",
-                    tags = listOf("a1", "travel"),
-                    cardType = CardType.Sentence,
-                    position = 0,
-                    fsrsState = CardFsrsState(
-                        due = 172800L,
-                        stability = 12.5f,
-                        difficulty = 4.2f,
-                        retrievability = 0.84f,
-                        easeFactor = 2.65f,
-                        averageInterval = 10,
-                        lastReviewDate = LocalDate(2026, 7, 20),
-                        nextReviewDate = LocalDate(2026, 7, 22),
-                        scheduledDays = 2,
-                        elapsedDays = 1,
-                        reps = 7,
-                        lapses = 2,
-                        state = CardState.Review,
-                    ),
-                    createdAt = Clock.System.now(),
-                )
+        sentenceWordLinkRepository.insertLink(
+            SentenceWordLink(
+                id = 0L,
+                sentenceCardId = cardId,
+                wordCardId = 0L,
+                positionInSentence = 0,
+                surfaceForm = "Ich",
             )
-            grammarTipRepository.insertTip(
-                GrammarTip(
-                    id = 0L,
-                    cardId = cardId,
-                    content = "Verb second position.",
-                    order = 0,
-                    source = GrammarTipSource.Bundled,
-                    createdAt = Clock.System.now(),
-                )
-            )
-            sentenceWordLinkRepository.insertLink(
-                SentenceWordLink(
-                    id = 0L,
-                    sentenceCardId = cardId,
-                    wordCardId = 0L,
-                    positionInSentence = 0,
-                    surfaceForm = "Ich",
-                )
-            )
-            return deckId
-        }
-    }
-
-    private class FakeDeckRepository : DeckRepository {
-        private var nextId = 1L
-        private val decks = MutableStateFlow<List<Deck>>(emptyList())
-        private val settings = mutableMapOf<Long, DeckSettings>()
-
-        override fun getAllDecks(): Flow<List<Deck>> = decks
-
-        override suspend fun getDeckById(id: Long): Deck? = decks.value.firstOrNull { it.id == id }
-
-        override suspend fun insertDeck(name: String, language: String, type: String): Long {
-            val deckId = nextId++
-            val deckType = runCatching { DeckType.valueOf(type) }.getOrDefault(DeckType.Linguistic)
-            decks.value = decks.value + Deck(deckId, name, language, deckType)
-            return deckId
-        }
-
-        override suspend fun updateDeck(deck: Deck) {
-            decks.value = decks.value.map { if (it.id == deck.id) deck else it }
-        }
-
-        override suspend fun deleteDeck(id: Long) {
-            decks.value = decks.value.filterNot { it.id == id }
-        }
-
-        override suspend fun getDeckSettings(deckId: Long): DeckSettings? = settings[deckId]
-
-        override suspend fun upsertDeckSettings(settings: DeckSettings) {
-            this.settings[settings.deckId] = settings
-        }
-    }
-
-    private class FakeCardRepository : CardRepository {
-        private var nextId = 1L
-        private val cards = MutableStateFlow<List<Card>>(emptyList())
-
-        override fun getCardsByDeckId(deckId: Long): Flow<List<Card>> = cards.map { list ->
-            list.filter { it.deckId == deckId }.sortedBy { it.position }
-        }
-
-        override suspend fun getCardById(id: Long): Card? = cards.value.firstOrNull { it.id == id }
-
-        override suspend fun getDueCards(deckId: Long, today: String): List<Card> =
-            cards.value.filter { it.deckId == deckId && it.fsrsState.due > 0 }
-
-        override suspend fun getNewCards(deckId: Long): List<Card> =
-            cards.value.filter { it.deckId == deckId && it.fsrsState.state == CardState.New }
-
-        override suspend fun insertCard(card: Card): Long {
-            val id = nextId++
-            cards.value = cards.value + card.copy(id = id)
-            return id
-        }
-
-        override suspend fun updateCard(card: Card) {
-            cards.value = cards.value.map { if (it.id == card.id) card else it }
-        }
-
-        override suspend fun updateCardFsrsState(cardId: Long, fsrsState: CardFsrsState) {
-            cards.value = cards.value.map { card ->
-                if (card.id == cardId) card.copy(fsrsState = fsrsState) else card
-            }
-        }
-
-        override suspend fun deleteCard(id: Long) {
-            cards.value = cards.value.filterNot { it.id == id }
-        }
-
-        override suspend fun deleteCardsByDeckId(deckId: Long) {
-            cards.value = cards.value.filterNot { it.deckId == deckId }
-        }
-    }
-
-    private class FakeGrammarTipRepository : GrammarTipRepository {
-        private var nextId = 1L
-        private val tips = MutableStateFlow<List<GrammarTip>>(emptyList())
-
-        override fun getTipsByCardId(cardId: Long): Flow<List<GrammarTip>> = tips.map { list ->
-            list.filter { it.cardId == cardId }.sortedBy { it.order }
-        }
-
-        override suspend fun insertTip(tip: GrammarTip): Long {
-            val id = nextId++
-            tips.value = tips.value + tip.copy(id = id)
-            return id
-        }
-
-        override suspend fun updateTipOrder(id: Long, order: Int) {
-            tips.value = tips.value.map { if (it.id == id) it.copy(order = order) else it }
-        }
-
-        override suspend fun updateTipContent(id: Long, content: String) {
-            tips.value = tips.value.map { if (it.id == id) it.copy(content = content) else it }
-        }
-
-        override suspend fun deleteTip(id: Long) {
-            tips.value = tips.value.filterNot { it.id == id }
-        }
-
-        override suspend fun deleteTipsByCardId(cardId: Long) {
-            tips.value = tips.value.filterNot { it.cardId == cardId }
-        }
-    }
-
-    private class FakeSentenceWordLinkRepository : SentenceWordLinkRepository {
-        private var nextId = 1L
-        private val links = mutableListOf<SentenceWordLink>()
-
-        override suspend fun getLinksBySentenceCardId(sentenceCardId: Long): List<SentenceWordLink> =
-            links.filter { it.sentenceCardId == sentenceCardId }.sortedBy { it.positionInSentence }
-
-        override suspend fun insertLink(link: SentenceWordLink) {
-            links += link.copy(id = nextId++)
-        }
-
-        override suspend fun deleteLink(id: Long) {
-            links.removeAll { it.id == id }
-        }
-
-        override suspend fun deleteLinksBySentenceCardId(sentenceCardId: Long) {
-            links.removeAll { it.sentenceCardId == sentenceCardId }
-        }
+        )
+        return deckId
     }
 }
